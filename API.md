@@ -159,6 +159,28 @@ Returns the updated `streamRedirections` object for `"mic"`.
 
 ---
 
+### `PUT /streamRedirections/streaming/deviceId/<encoded-id>`
+
+Sets the **streaming/recording output device** (what your stream or recording capture hears).
+
+- Same format as the monitoring endpoint
+- Device must have `dataFlow: "render"`
+- Streaming is off by default; setting the device does not start it
+
+Returns the updated `streamRedirections` object for `"streaming"`.
+
+---
+
+### `GET /mode`
+
+Returns the current Sonar operating mode as a JSON string: `"classic"` or `"streamer"`.
+
+```
+"classic"
+```
+
+---
+
 ### `GET /volumeSettings/streamer`
 
 Returns volume and mute state for all channels, in both monitoring and streaming mixes.
@@ -205,4 +227,6 @@ Enables or disables a channel in the **streaming mix**.
 - All device IDs use Windows audio endpoint format: `{0.0.0.00000000}.{GUID}` for render, `{0.0.1.00000000}.{GUID}` for capture.
 - The Sonar virtual audio devices (`isVad: true`) are Sonar's own internal mixing endpoints — do not use them as monitoring or mic targets.
 - The API is only available while SteelSeries Engine and Sonar are running.
-- Only **streamer mode** has been tested. Classic mode may differ.
+- Each stream redirection type (`monitoring`, `streaming`, `mic`) routes to exactly **one** physical device. Per-channel routing to different devices is not supported.
+- `PUT /streamRedirections/classic/deviceId/<encoded-id>` exists (returns 400, not 404) but rejects all device IDs tried — its purpose and requirements are unknown.
+- Both classic and streamer modes expose the same `streamRedirections` endpoints.

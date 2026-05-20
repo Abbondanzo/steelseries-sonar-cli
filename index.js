@@ -203,7 +203,14 @@ async function cmdGet() {
 function resolveDevice(value, devices, label) {
   if (value.startsWith('{')) {
     const match = devices.find((d) => d.id === value);
-    return match ?? { name: value, id: value, dataFlow: /** @type {'render'} */ ('render'), isVirtual: false };
+    return (
+      match ?? {
+        name: value,
+        id: value,
+        dataFlow: /** @type {'render'} */ ('render'),
+        isVirtual: false,
+      }
+    );
   }
   const result = pickByName(devices, value);
   if (result.error) {
@@ -253,7 +260,11 @@ async function cmdSet(args) {
     );
     const device = resolveDevice(flags.output, candidates, 'output');
     console.log(`Output → ${device.name}\n  ${device.id}\n`);
-    await applyDevice(addr, 'streamRedirections/monitoring/deviceId', device.id);
+    await applyDevice(
+      addr,
+      'streamRedirections/monitoring/deviceId',
+      device.id,
+    );
   }
 
   if (flags.input) {
