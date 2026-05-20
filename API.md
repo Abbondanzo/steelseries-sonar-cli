@@ -21,7 +21,7 @@ The Sonar web server address is found in two steps:
 GET https://<ggEncryptedAddress>/subApps
 ```
 
-The Engine uses a self-signed TLS cert — disable certificate verification.
+The Engine uses a self-signed TLS cert - disable certificate verification.
 
 Response (relevant fields):
 
@@ -40,7 +40,7 @@ Response (relevant fields):
 }
 ```
 
-All subsequent calls use `http://127.0.0.1:<port>` — plain HTTP, no TLS.
+All subsequent calls use `http://127.0.0.1:<port>` - plain HTTP, no TLS.
 
 ---
 
@@ -131,7 +131,7 @@ The three `streamRedirectionId` values:
 
 | ID           | Purpose                                                  |
 | ------------ | -------------------------------------------------------- |
-| `monitoring` | What you hear — the render device for the monitoring mix |
+| `monitoring` | What you hear - the render device for the monitoring mix |
 | `mic`        | Which physical microphone Sonar captures from            |
 | `streaming`  | Output device for the streaming/recording mix            |
 
@@ -204,7 +204,7 @@ Channel names: `game`, `chatRender`, `chatCapture`, `media`, `aux`
 
 ### `PUT /volumeSettings/streamer/monitoring/<channel>/Volume/<float>`
 
-Sets the **monitoring mix volume** for a channel. Float is `0.0`–`1.0`.
+Sets the **monitoring mix volume** for a channel. Float is `0.0`-`1.0`.
 
 ### `PUT /volumeSettings/streamer/streaming/<channel>/Volume/<float>`
 
@@ -225,8 +225,8 @@ Enables or disables a channel in the **streaming mix**.
 ## Notes
 
 - All device IDs use Windows audio endpoint format: `{0.0.0.00000000}.{GUID}` for render, `{0.0.1.00000000}.{GUID}` for capture.
-- The Sonar virtual audio devices (`isVad: true`) are Sonar's own internal mixing endpoints — do not use them as monitoring or mic targets.
+- The Sonar virtual audio devices (`isVad: true`) are Sonar's own internal mixing endpoints - do not use them as monitoring or mic targets.
 - The API is only available while SteelSeries Engine and Sonar are running.
 - Each stream redirection type (`monitoring`, `streaming`, `mic`) routes to exactly **one** physical device. Per-channel routing to different devices is not supported.
-- `PUT /streamRedirections/classic/deviceId/<encoded-id>` exists (returns 400, not 404) but rejects all device IDs tried — its purpose and requirements are unknown.
+- `PUT /streamRedirections/classic/deviceId/<encoded-id>` exists (returns 400, not 404) but rejects all device IDs tried - its purpose and requirements are unknown.
 - Both classic and streamer modes expose the same `streamRedirections` endpoints.

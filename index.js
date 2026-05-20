@@ -22,6 +22,9 @@ const path = require('path');
  * @typedef {{ status: number, text: string }} HttpResponse
  */
 
+/** @type {ReadonlyArray<string>} */
+const CHANNELS = ['game', 'chatRender', 'chatCapture', 'media', 'aux'];
+
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
 /**
@@ -97,6 +100,17 @@ async function getSonarAddress() {
   return addr;
 }
 
+/**
+ * @param {string} addr - Sonar web server address
+ * @returns {Promise<'classic' | 'streamer'>}
+ */
+async function getSonarMode(addr) {
+  const resp = await request('GET', `${addr}/mode`);
+  if (resp.status !== 200)
+    throw new Error(`/mode returned HTTP ${resp.status}`);
+  return JSON.parse(resp.text);
+}
+
 // ─── Sonar audio device listing ──────────────────────────────────────────────
 
 /**
@@ -139,7 +153,22 @@ function pickByName(devices, name) {
   };
 }
 
-// ─── Sonar API: apply a device change ────────────────────────────────────────
+// ─── Sonar API: apply changes ─────────────────────────────────────────────────
+
+/**
+ * PUT with no request body; exits on HTTP error.
+ * @param {string} addr
+ * @param {string} path - full path suffix (no leading slash, value already included)
+ * @returns {Promise<void>}
+ */
+async function applyPut(addr, path) {
+  const url = `${addr}/${path}`;
+  const resp = await request('PUT', url);
+  if (resp.status >= 200 && resp.status < 300) return;
+  console.error(`Failed (HTTP ${resp.status}) - URL: ${url}`);
+  if (resp.text) console.error(resp.text);
+  process.exit(1);
+}
 
 /**
  * @param {string} addr - Sonar web server address
@@ -156,7 +185,7 @@ async function applyDevice(addr, apiPath, deviceId) {
       `Done (HTTP ${resp.status})${resp.text ? ': ' + resp.text : ''}`,
     );
   } else {
-    console.error(`Failed (HTTP ${resp.status}) — URL: ${url}`);
+    console.error(`Failed (HTTP ${resp.status}) - URL: ${url}`);
     if (resp.text) console.error(resp.text);
     process.exit(1);
   }
@@ -169,14 +198,14 @@ async function cmdGet() {
   const addr = await getSonarAddress();
   process.stdout.write(` ok  (${addr})\n`);
 
-  // Probe every known GET endpoint so the full API state is visible.
-  // This is the best way to identify correct paths for any missing features (e.g. mic routing).
+  const mode = await getSonarMode(addr);
+
   const endpoints = [
+    'mode',
     'streamRedirections/',
     'streamRedirections/monitoring',
-    'volumeSettings/streamer',
+    `volumeSettings/${mode}`,
     'audioDevices',
-    'audioDivert',
   ];
 
   for (const ep of endpoints) {
@@ -312,9 +341,75 @@ async function cmdList(flags = []) {
   const hiddenVirtual = all.filter((d) => d.isVirtual).length;
   if (!showAll && hiddenVirtual > 0) {
     console.log(
-      `\n(${hiddenVirtual} Sonar virtual devices hidden — use --all to show)`,
+      `\n(${hiddenVirtual} Sonar virtual devices hidden - use --all to show)`,
     );
   }
+}
+
+/**
+ * @param {string[]} args
+ * @param {boolean} muted
+ * @returns {Promise<void>}
+ */
+async function cmdMute(args, muted) {
+  const channel = args[0];
+  if (!channel || !CHANNELS.includes(channel)) {
+    console.error(
+      `Error: valid channel required.\n` +
+        `Usage: node index.js ${muted ? 'mute' : 'unmute'} <channel>\n` +
+        `Channels: ${CHANNELS.join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  process.stdout.write('Connecting to Sonar...');
+  const addr = await getSonarAddress();
+  const mode = await getSonarMode(addr);
+  process.stdout.write(' ok\n\n');
+
+  console.log(`${muted ? 'Muting' : 'Unmuting'} ${channel}`);
+  await applyPut(addr, `volumeSettings/${mode}/${channel}/Mute/${muted}`);
+  console.log('Done');
+}
+
+/**
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
+async function cmdVolume(args) {
+  const channel = args[0];
+  const levelStr = args[1];
+
+  if (!channel || !CHANNELS.includes(channel) || levelStr === undefined) {
+    console.error(
+      `Error: channel and level required.\n` +
+        `Usage: node index.js volume <channel> <0.0-1.0>\n` +
+        `Channels: ${CHANNELS.join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  const level = parseFloat(levelStr);
+  if (isNaN(level) || level < 0 || level > 1) {
+    console.error(
+      `Error: level must be between 0.0 and 1.0, got "${levelStr}"`,
+    );
+    process.exit(1);
+  }
+
+  process.stdout.write('Connecting to Sonar...');
+  const addr = await getSonarAddress();
+  const mode = await getSonarMode(addr);
+  process.stdout.write(' ok\n\n');
+
+  const volumePath =
+    mode === 'classic'
+      ? `volumeSettings/classic/${channel}/Volume/${level}`
+      : `volumeSettings/streamer/monitoring/${channel}/Volume/${level}`;
+
+  console.log(`${channel} volume → ${level}`);
+  await applyPut(addr, volumePath);
+  console.log('Done');
 }
 
 function printHelp() {
@@ -329,6 +424,12 @@ Commands:
         --output, -o    Render device (speakers / headphones)
         --input,  -i    Capture device (microphone)
 
+  mute <channel>        Mute a channel
+  unmute <channel>      Unmute a channel
+  volume <channel> <n>  Set channel volume (0.0-1.0)
+
+        Channels: game, chatRender, chatCapture, media, aux
+
   list [--all]          List Sonar audio devices (Sonar virtual devices hidden by default)
   get                   Show current Sonar routing config
   help                  Show this message
@@ -338,6 +439,8 @@ Examples:
   node index.js set --input "Arctis 9 Chat"
   node index.js set --output "Arctis 9 Game" --input "Arctis 9 Chat"
   node index.js set --output "{0.0.0.00000000}.{9351f935-...}"
+  node index.js mute chatCapture
+  node index.js volume game 0.8
   node index.js list`);
 }
 
@@ -356,6 +459,15 @@ const [, , cmd, ...args] = process.argv;
         break;
       case 'list':
         await cmdList(args);
+        break;
+      case 'mute':
+        await cmdMute(args, true);
+        break;
+      case 'unmute':
+        await cmdMute(args, false);
+        break;
+      case 'volume':
+        await cmdVolume(args);
         break;
       case 'help':
       case '--help':
