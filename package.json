@@ -1,0 +1,12 @@
+{
+  "name": "sonar-device",
+  "version": "1.0.0",
+  "description": "CLI to get/set the SteelSeries Sonar monitoring playback device",
+  "main": "index.js",
+  "bin": {
+    "sonar-device": "./index.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}
