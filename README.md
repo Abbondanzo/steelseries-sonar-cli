@@ -1,4 +1,4 @@
-# steelseries-sonar-api
+# steelseries-sonar-cli
 
 CLI to get/set audio device routing in [SteelSeries Sonar](https://steelseries.com/gg/sonar) via its local HTTP API.
 
