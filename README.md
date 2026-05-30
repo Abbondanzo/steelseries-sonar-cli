@@ -2,7 +2,7 @@
 
 CLI to get/set audio device routing in [SteelSeries Sonar](https://steelseries.com/gg/sonar) via its local HTTP API.
 
-Requires SteelSeries GG with Sonar running.
+If SteelSeries GG is not running, commands will attempt to start it automatically.
 
 ## Usage
 
@@ -48,6 +48,12 @@ node index.js list --all
 
 **`get`** - Dump the current Sonar routing config (all known API endpoints).
 
+**`start`** - Start SteelSeries GG if it is not already running and wait for Sonar to become ready. All other commands do this automatically, so `start` is mainly useful for scripting or shell startup.
+
+```sh
+node index.js start
+```
+
 ## No dependencies
 
-Uses only Node.js built-ins (`http`, `https`, `fs`, `path`). Node 14+ required.
+Uses only Node.js built-ins (`http`, `https`, `fs`, `path`, `child_process`). Node 14+ required.

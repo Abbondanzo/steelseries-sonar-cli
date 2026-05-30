@@ -5,6 +5,7 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn, exec } = require('child_process');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,7 +14,7 @@ const path = require('path');
  */
 
 /**
- * @typedef {{ device: AudioDevice, note?: string }} PickSuccess
+ * @typedef {{ device: AudioDevice }} PickSuccess
  * @typedef {{ error: string }} PickFailure
  * @typedef {PickSuccess | PickFailure} PickResult
  */
@@ -191,13 +192,131 @@ async function applyDevice(addr, apiPath, deviceId) {
   }
 }
 
+// ─── GG process management ────────────────────────────────────────────────────
+
+const GG_BASE_DIRS = [
+  path.join('C:\\Program Files', 'SteelSeries', 'GG'),
+  path.join('C:\\Program Files (x86)', 'SteelSeries', 'GG'),
+];
+
+/** @returns {Promise<boolean>} */
+function isGGRunning() {
+  return new Promise((resolve) => {
+    exec(
+      'tasklist /fi "imagename eq SteelSeriesGGEZ.exe" /fo csv /nh',
+      (err, stdout) => {
+        resolve(!err && stdout.toLowerCase().includes('steelseriesggez.exe'));
+      },
+    );
+  });
+}
+
+/** @returns {Promise<void>} */
+function killGG() {
+  return new Promise((resolve, reject) => {
+    exec('taskkill /f /im SteelSeriesGGEZ.exe', (err) => {
+      if (err)
+        reject(new Error(`Could not stop SteelSeries GG: ${err.message}`));
+      else resolve();
+    });
+  });
+}
+
+/**
+ * Starts SteelSeriesGGEZ.exe and polls until Sonar becomes ready.
+ * @returns {Promise<string>} Sonar web server address
+ */
+async function launchGG() {
+  const ggDir = GG_BASE_DIRS.find((p) => fs.existsSync(p));
+  if (!ggDir) {
+    throw new Error(
+      'SteelSeries GG installation not found. Tried:\n' +
+        GG_BASE_DIRS.map((p) => `  ${p}`).join('\n'),
+    );
+  }
+  const exe = path.join(ggDir, 'SteelSeriesGGEZ.exe');
+  if (!fs.existsSync(exe)) {
+    throw new Error(`Expected executable not found: ${exe}`);
+  }
+
+  // GGez is a single-instance app — if it's already running our spawn would be a
+  // no-op, leaving us polling a stale port forever. Kill it first for a clean start.
+  if (await isGGRunning()) {
+    process.stdout.write(
+      'SteelSeries GG is running but Sonar is unavailable — restarting...\n',
+    );
+    await killGG();
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
+  const dataPath = path.join(
+    process.env.ProgramData || 'C:\\ProgramData',
+    'SteelSeries',
+    'GG',
+  );
+  const args = [`-dataPath=${dataPath}`, '-dbEnv=production', '-auto=true'];
+
+  console.log(`Launching: ${exe}`);
+  const child = spawn(exe, args, {
+    detached: true,
+    stdio: 'ignore',
+    cwd: ggDir,
+  });
+
+  // Hold briefly to catch immediate spawn errors before detaching
+  let spawnError = null;
+  child.on('error', (err) => {
+    spawnError = err;
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  if (spawnError) throw spawnError;
+  child.unref();
+
+  const TIMEOUT_MS = 30_000;
+  const POLL_MS = 2_000;
+  const deadline = Date.now() + TIMEOUT_MS;
+  let lastError = '';
+
+  process.stdout.write(
+    `Waiting for Sonar to become ready (up to ${TIMEOUT_MS / 1000}s)`,
+  );
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    try {
+      const addr = await getSonarAddress();
+      process.stdout.write(`\nSonar is ready  (${addr})\n`);
+      return addr;
+    } catch (err) {
+      lastError = err.message;
+      process.stdout.write('.');
+    }
+  }
+  process.stdout.write('\n');
+  throw new Error(
+    `Timed out after ${TIMEOUT_MS / 1000}s. Last status: ${lastError}`,
+  );
+}
+
+/**
+ * Returns the Sonar address, auto-starting SteelSeries GG if it is not running.
+ * @returns {Promise<string>}
+ */
+async function connectToSonar() {
+  process.stdout.write('Connecting to Sonar...');
+  try {
+    const addr = await getSonarAddress();
+    process.stdout.write(` ok  (${addr})\n`);
+    return addr;
+  } catch {
+    process.stdout.write(' not running\n');
+    return launchGG();
+  }
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 async function cmdGet() {
-  process.stdout.write('Connecting to Sonar...');
-  const addr = await getSonarAddress();
-  process.stdout.write(` ok  (${addr})\n`);
-
+  const addr = await connectToSonar();
   const mode = await getSonarMode(addr);
 
   const endpoints = [
@@ -273,9 +392,8 @@ async function cmdSet(args) {
     process.exit(1);
   }
 
-  process.stdout.write('Connecting to Sonar...');
-  const addr = await getSonarAddress();
-  process.stdout.write(' ok\n\n');
+  const addr = await connectToSonar();
+  process.stdout.write('\n');
 
   // Fetch device list once, only if at least one flag needs name resolution
   const needsLookup =
@@ -312,9 +430,7 @@ async function cmdSet(args) {
  */
 async function cmdList(flags = []) {
   const showAll = flags.includes('--all');
-  process.stdout.write('Connecting to Sonar...');
-  const addr = await getSonarAddress();
-  process.stdout.write(' ok\n');
+  const addr = await connectToSonar();
 
   const all = await listSonarDevices(addr);
   const visible = showAll ? all : all.filter((d) => !d.isVirtual);
@@ -362,10 +478,9 @@ async function cmdMute(args, muted) {
     process.exit(1);
   }
 
-  process.stdout.write('Connecting to Sonar...');
-  const addr = await getSonarAddress();
+  const addr = await connectToSonar();
   const mode = await getSonarMode(addr);
-  process.stdout.write(' ok\n\n');
+  process.stdout.write('\n');
 
   console.log(`${muted ? 'Muting' : 'Unmuting'} ${channel}`);
   await applyPut(addr, `volumeSettings/${mode}/${channel}/Mute/${muted}`);
@@ -397,10 +512,9 @@ async function cmdVolume(args) {
     process.exit(1);
   }
 
-  process.stdout.write('Connecting to Sonar...');
-  const addr = await getSonarAddress();
+  const addr = await connectToSonar();
   const mode = await getSonarMode(addr);
-  process.stdout.write(' ok\n\n');
+  process.stdout.write('\n');
 
   const volumePath =
     mode === 'classic'
@@ -410,6 +524,10 @@ async function cmdVolume(args) {
   console.log(`${channel} volume → ${level}`);
   await applyPut(addr, volumePath);
   console.log('Done');
+}
+
+async function cmdStart() {
+  await connectToSonar();
 }
 
 function printHelp() {
@@ -432,6 +550,7 @@ Commands:
 
   list [--all]          List Sonar audio devices (Sonar virtual devices hidden by default)
   get                   Show current Sonar routing config
+  start                 Launch SteelSeries GG if not running and wait for Sonar to become ready
   help                  Show this message
 
 Examples:
@@ -468,6 +587,9 @@ const [, , cmd, ...args] = process.argv;
         break;
       case 'volume':
         await cmdVolume(args);
+        break;
+      case 'start':
+        await cmdStart();
         break;
       case 'help':
       case '--help':
